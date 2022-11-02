@@ -266,6 +266,8 @@
 
 #define SHM_ENV_VAR         "__AFL_SHM_ID"
 
+#define BB_SHM_ENV          "__BB_SHM_ID"
+
 /* Other less interesting, internal-only variables. */
 
 #define CLANG_ENV_VAR       "__AFL_CLANG_MODE"

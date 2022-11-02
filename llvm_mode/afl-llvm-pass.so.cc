@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <unordered_map>
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/IRBuilder.h"
@@ -47,7 +48,11 @@ namespace {
     public:
 
       static char ID;
+      std::unordered_map<BasicBlock *, u32> basicBlockMap;
+
       AFLCoverage() : ModulePass(ID) { }
+
+      bool doInitialization(Module &M) override;
 
       bool runOnModule(Module &M) override;
 
@@ -62,10 +67,29 @@ namespace {
 
 char AFLCoverage::ID = 0;
 
+bool AFLCoverage::doInitialization(Module &M) {
+  /* Initialize id for each basic block */
+  u32 rand_seed;
+  char *rand_seed_str = getenv("AFL_RAND_SEED");
+
+  if (rand_seed_str && sscanf(rand_seed_str, "%u", &rand_seed))
+    srand(rand_seed);
+
+  for (auto &F : M)
+    for (auto &BB : F) {
+      u32 cur_loc = AFL_R(MAP_SIZE);
+      basicBlockMap.insert(std::pair<BasicBlock *, u32>(&BB, cur_loc));
+    }
+
+  return true;
+}
+
 
 bool AFLCoverage::runOnModule(Module &M) {
 
   LLVMContext &C = M.getContext();
+
+  Type *voidType = Type::getVoidTy(C);
 
   IntegerType *Int8Ty  = IntegerType::getInt8Ty(C);
   IntegerType *Int32Ty = IntegerType::getInt32Ty(C);
@@ -104,6 +128,10 @@ bool AFLCoverage::runOnModule(Module &M) {
       M, Int32Ty, false, GlobalValue::ExternalLinkage, 0, "__afl_prev_loc",
       0, GlobalVariable::GeneralDynamicTLSModel, 0, false);
 
+  FunctionCallee TraceBB = (&M)->getOrInsertFunction(
+      "__trace_basic_blk",
+      FunctionType::get(voidType, {Int32Ty}, false));
+
   /* Instrument all the things! */
 
   int inst_blocks = 0;
@@ -118,9 +146,12 @@ bool AFLCoverage::runOnModule(Module &M) {
 
       /* Make up cur_loc */
 
-      unsigned int cur_loc = AFL_R(MAP_SIZE);
+      // unsigned int cur_loc = AFL_R(MAP_SIZE);
+      unsigned int cur_loc = basicBlockMap[&BB];
 
       ConstantInt *CurLoc = ConstantInt::get(Int32Ty, cur_loc);
+
+       IRB.CreateCall(TraceBB, {CurLoc});
 
       /* Load prev_loc */
 
